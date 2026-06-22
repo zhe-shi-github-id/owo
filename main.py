@@ -9,7 +9,7 @@ def load_json(p, default):
         try:
             with open(p, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError):
             return default
     return default
 
@@ -45,8 +45,8 @@ class GroupManager(Star):
         for kw in self.config.get("blocked_keywords", []):
             if kw in text:
                 logger.info(f"[关键词屏蔽] 群 {event.group_id} 检测到: {kw}")
-                yield event.plain_result(f"检测到违规关键词“{kw}”，请注意文明发言！")
                 event.stop_event()
+                yield event.plain_result(f"检测到违规关键词“{kw}”，请注意文明发言！")
                 return
 
     # =============== 踢人命令 ===============
@@ -54,8 +54,11 @@ class GroupManager(Star):
     async def cmd_kick(self, event: AstrMessageEvent, target_id: str):
         """踢人命令：/kick QQ号"""
         admin_list = self.config.get("admin_user_ids", [])
-        if admin_list and event.get_sender_id() not in admin_list:
+        if not admin_list or event.get_sender_id() not in admin_list:
             yield event.plain_result("你没有权限使用该命令。")
+            return
+        if not target_id.isdigit():
+            yield event.plain_result("目标 ID 格式无效，请输入纯数字 QQ 号。")
             return
         try:
             await self.context.kick_group_member(event.message_obj.group_id, target_id)
@@ -68,9 +71,13 @@ class GroupManager(Star):
     async def cmd_mute(self, event: AstrMessageEvent, target_id: str, duration: int = 10):
         """禁言命令：/mute QQ号 时长(分钟)"""
         admin_list = self.config.get("admin_user_ids", [])
-        if admin_list and event.get_sender_id() not in admin_list:
+        if not admin_list or event.get_sender_id() not in admin_list:
             yield event.plain_result("你没有权限使用该命令。")
             return
+        if not target_id.isdigit():
+            yield event.plain_result("目标 ID 格式无效，请输入纯数字 QQ 号。")
+            return
+        duration = max(1, min(duration, 43200))
         try:
             await self.context.mute_group_member(event.message_obj.group_id, target_id, duration * 60)
             yield event.plain_result(f"已禁言 {target_id} {duration} 分钟")
@@ -82,7 +89,7 @@ class GroupManager(Star):
     async def cmd_welcome(self, event: AstrMessageEvent, *, msg: str):
         """修改欢迎语：/welcome 欢迎 {user} 来到群里"""
         admin_list = self.config.get("admin_user_ids", [])
-        if admin_list and event.get_sender_id() not in admin_list:
+        if not admin_list or event.get_sender_id() not in admin_list:
             yield event.plain_result("你没有权限使用该命令。")
             return
         self.config["welcome_message"] = msg
