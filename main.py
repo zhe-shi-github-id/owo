@@ -5,16 +5,19 @@ from astrbot.api import logger
 import os, json
 
 def load_json(p, default):
-    if os.path.exists(p):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return default
-    return default
+    if not os.path.exists(p):
+        return default
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to load {p}, using default: {e}")
+        return default
 
 def save_json(p, data):
-    os.makedirs(os.path.dirname(p), exist_ok=True)
+    dir_name = os.path.dirname(p)
+    if dir_name:
+        os.makedirs(dir_name, exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -27,7 +30,10 @@ class GroupManager(Star):
         self.group_states = load_json(os.path.join(self.data_dir, "group_states.json"), {})
 
     async def terminate(self):
-        save_json(os.path.join(self.data_dir, "group_states.json"), self.group_states)
+        try:
+            save_json(os.path.join(self.data_dir, "group_states.json"), self.group_states)
+        except OSError as e:
+            logger.error(f"Failed to save group states on shutdown: {e}")
 
     # =============== 自动欢迎新成员 ===============
     @filter.event_notice_type(filter.EventNoticeType.GROUP_MEMBER_INCREASE)
@@ -35,8 +41,9 @@ class GroupManager(Star):
         if not self.config.get("enable_welcome", True):
             return
         welcome_text = self.config.get("welcome_message", "欢迎 {user} 加入群聊！")
-        user_name = event.message_obj.user_name or event.message_obj.user_id
-        yield event.plain_result(welcome_text.replace("{user}", user_name))
+        msg_obj = event.message_obj
+        user_name = getattr(msg_obj, "user_name", None) or getattr(msg_obj, "user_id", "未知用户")
+        yield event.plain_result(welcome_text.replace("{user}", str(user_name)))
 
     # =============== 关键词屏蔽 ===============
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
@@ -86,5 +93,10 @@ class GroupManager(Star):
             yield event.plain_result("你没有权限使用该命令。")
             return
         self.config["welcome_message"] = msg
-        self.config.save_config()
+        try:
+            self.config.save_config()
+        except Exception as e:
+            logger.error(f"Failed to persist welcome message config: {e}")
+            yield event.plain_result(f"欢迎语已在内存中更新，但保存到磁盘失败：{e}")
+            return
         yield event.plain_result(f"已更新欢迎语为：{msg}")
